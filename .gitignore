@@ -117,3 +117,4 @@ merged/
 pyvenv.cfg
 .DS_Store
 availability.txt
+.vscode/settings.json

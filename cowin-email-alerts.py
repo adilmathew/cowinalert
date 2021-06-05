@@ -8,23 +8,28 @@ from email.message import EmailMessage
 import time
 import os
 import logging
+import requests
 
 
 # Either insert your emails and password here or use python-decouple or follow this article https://saralgyaan.com/posts/set-passwords-and-secret-keys-in-environment-variables-maclinuxwindows-python-quicktip/
 
-FROM_EMAIL = config('FROM_EMAIL')
-TO_EMAIL = config('TO_EMAIL')
-PASSWORD = config('PASSWORD')
+#FROM_EMAIL = os.environ.get('email')
+FROM_EMAIL="cowinniranam@gmail.com"
+TO_EMAIL = "adilmathew@gmail.com"
+#PASSWORD = os.environ.get('password')
+PASSWORD="covid19@niranam"
 
 # Just Change these values
 no_of_days = 28   # Change this to 7,14,21 or 28
-pincodes = ['141001', '141002']  # Add as many pincodes as you want separated by commas
+distcodes = ['300', '301']  # Add as many pincodes as you want separated by commas
 min_age_limit = 18  # Change this to 18 if you want 18+
 
 BASE_DATE = datetime.datetime.now()
-DATE_LIST = date_list = [BASE_DATE + datetime.timedelta(days=x * 7) for x in range(int(no_of_days / 7))]
+#DATE_LIST = date_list = [BASE_DATE + datetime.timedelta(days=x * 7) for x in range(int(no_of_days / 7))]
+DATE_LIST = date_list = [BASE_DATE + datetime.timedelta(days=x ) for x in range(int( 7))]
 
 dates = [date.strftime("%d-%m-%Y") for date in date_list]
+
 
 # Start the API
 cowin = CoWinAPI()
@@ -73,7 +78,7 @@ def send_email(text_file: str):
     with open(text_file, 'r') as f:
         contents = f.readlines()
         text = '\n'.join(contents)
-        final_text = f'Dear Udit,\n\n Covid Vaccination slots are available at the following locations\n {text} \n\nRegards,\n Udit'
+        final_text = f'Dear adil,\n\n Covid Vaccination slots are available at the following locations\n {text} \n\nRegards,\n adil'
     message.set_content(final_text)
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
@@ -81,7 +86,7 @@ def send_email(text_file: str):
         smtp.send_message(message)
 
 
-def get_availability(pincode: str, date: str, min_age_limit: int):
+def get_availability(distcode: str, date: str, min_age_limit: int):
     """
     This function checks the availability of the Covid Vaccination and create a pandas dataframe of the available slots details.
 
@@ -100,20 +105,22 @@ def get_availability(pincode: str, date: str, min_age_limit: int):
         Containing the details of the hospital where slot is available.
 
     """
-    results = cowin.get_availability_by_pincode(pincode, date, min_age_limit)
-    master_data = results['centers']
+    #results = cowin.get_availability_by_district(distcode, date, min_age_limit)
+    response = requests.get(
+    'https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/findByDistrict',
+    params={'district_id': distcode,"date":date,},)
+    response=response.json()
+    master_data = response.get("sessions")
+    
     if master_data != []:
         df = pd.DataFrame(master_data)
+       
         if len(df):
-            df = df.explode("sessions")
-            df['min_age_limit'] = df.sessions.apply(lambda x: x['min_age_limit'])
-            df['vaccine'] = df.sessions.apply(lambda x: x['vaccine'])
-            df['available_capacity'] = df.sessions.apply(lambda x: x['available_capacity'])
-            df['date'] = df.sessions.apply(lambda x: x['date'])
-            df = df[["date", "available_capacity", "vaccine", "min_age_limit", "pincode", "name", "state_name", "district_name", "block_name", "fee_type"]]
-            df = df[df['available_capacity'] != 0]
-            df.drop_duplicates(inplace=True)
-            return df
+            new_df=df[['name','district_name','pincode',"date",
+            "available_capacity_dose1","available_capacity_dose2","available_capacity",
+            "fee","min_age_limit"]].copy()
+           
+            return new_df
 
 
 def main():
@@ -126,19 +133,29 @@ def main():
     """
 
     final_df = None
-    for pincode in pincodes:
+    for distcode in distcodes:
         for date in dates:
-            temp_df = get_availability(pincode, date, min_age_limit)
+            temp_df = get_availability(distcode, date, min_age_limit)
             if final_df is not None:
                 final_df = pd.concat([final_df, temp_df])
             else:
                 final_df = deepcopy(temp_df)
-    if final_df is not None:
-        final_df.set_index('date', inplace=True)
-        final_df.to_csv(r'availability.txt', sep=' ', mode='a')
+
+  
+    dff=final_df[(final_df['min_age_limit']==18) & (final_df[ "available_capacity_dose1"]>0)]
+    
+    
+    if dff.shape[0] !=0:
+        dff.set_index('date', inplace=True)
+        dff.to_csv(r'availability.txt', sep=' ')
         send_email('availability.txt')
+        
+        
+    
+    
+        
     else:
-        logger.info(f'There is no slot available for age {str(min_age_limit)} and above for pincode(s) {" ".join(pincodes)}')
+        logger.info(f'There is no slot available for age {str(min_age_limit)} and above for pincode(s) {" ".join(distcodes)}')
 
 
 if __name__ == '__main__':
